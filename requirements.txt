@@ -10,3 +10,10 @@ pyarrow
 streamlit
 streamlit-folium
 streamlit-keplergl
+sqlalchemy
+openpyxl
+pandas
+numpy
+rioxarray
+rasterio
+psycopg2
