@@ -21,9 +21,10 @@ def connect_database(loc):
     # Connecting to the database# Connecting to database
     engine = create_engine(create_engine_str)
     inspector = inspect(engine)
+    return engine, inspector
 
 # Connecting to the database
-connect_database(database_credentials)
+engine, inspector = connect_database(database_credentials)
 
 # Obtaining the geodata
 

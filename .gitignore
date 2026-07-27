@@ -131,5 +131,9 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# Database credentials
+# Excel files to ignore
 /workspaces/streamlit-geospatial/Database_credentials.xlsx
+ward_water_resilience_labels.csv
+
+# Database credentials
+/workspaces/streamlit-geospatial/.streamlit/secrets.toml
