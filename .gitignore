@@ -136,4 +136,4 @@ dmypy.json
 ward_water_resilience_labels.csv
 
 # Database credentials
-/workspaces/streamlit-geospatial/.streamlit/secrets.toml
+.streamlit/

@@ -1,3 +1,0 @@
-[server]
-# Default: 200
-maxMessageSize = 250
