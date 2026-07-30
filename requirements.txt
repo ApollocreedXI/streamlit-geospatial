@@ -15,3 +15,6 @@ rioxarray
 rasterio
 psycopg2
 altair
+shapely
+json
+datetime
