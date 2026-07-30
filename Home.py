@@ -32,7 +32,7 @@ st.info("Click on the left sidebar menu to navigate to the vulnerability cluster
 # st.markdown("""
 #     The following timelapse animations were created using the Timelapse web app. Click `Timelapse` on the left sidebar menu to create your own timelapse for any location around the globe.
 # """)
-
+st.image("https://github.com/ApollocreedXI/Database-Design-for-Climate-Resilient-Water-Management-Systems-in-Tanzania/blob/main/references/Home%20Image.png?raw=true")
 # row1_col1, row1_col2 = st.columns(2)
 # with row1_col1:
 #     st.image("https://github.com/giswqs/data/raw/main/timelapse/spain.gif")
