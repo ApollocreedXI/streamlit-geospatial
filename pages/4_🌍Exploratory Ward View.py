@@ -1,0 +1,301 @@
+import os
+import geopandas as gpd
+import pandas as pd
+from sqlalchemy import create_engine, text, inspect
+from shapely.wkb import loads
+import json
+import streamlit as st
+import altair as alt
+from datetime import datetime as dt
+
+
+# Initialize connection.
+conn = st.connection("postgresql", type="sql")
+
+# Creating geolevel object
+geo_level = 'ward'
+
+query_ward = (f'''
+SELECT * FROM climate_resilience.proj_ward
+ORDER BY ward_id''')
+ward_df = conn.query(query_ward, ttl=None)
+# Converting the geometry column to WKT
+ward_df['geometry'] = ward_df['ward_geometry_proj'].apply(loads)
+# Converting to GeoDataFrame
+ward_df = gpd.GeoDataFrame(ward_df, geometry='geometry')
+ward_df = ward_df.set_crs('ESRI:102022')
+
+### Extracting basic geo-level information
+
+# Extracting geo_level information for major basins
+basin_geometry_data_query = (f'''
+SELECT * FROM climate_resilience.proj_major_basin''')
+# Executing query
+basin_geometry_df = conn.query(basin_geometry_data_query, ttl=None) # Store catched result
+# Converting the geometry column to WKT
+basin_geometry_df['geometry'] = basin_geometry_df['basin_geometry_proj'].apply(loads)
+# Converting to GeoDataFrame
+basin_geometry_gdf = gpd.GeoDataFrame(basin_geometry_df, geometry='geometry')
+# st.write(basin_geometry_df)
+# Extracting mappings for basin_id and basin name
+basin_mappings = dict(zip(basin_geometry_gdf['basin_id'], basin_geometry_gdf['basin_name']))
+
+### Creating a dropdown menu
+
+# Creating a iterable to pass to the selectbox
+ward_id = ward_df['ward_id'].to_list()
+
+# Creating selectbox
+ward_selection_id = st.selectbox('Select a ward', ward_id)
+
+#st.write(ward_selection_id)
+
+### Creating queries 
+
+# Extracting land aridity stats
+aridity_stats_query = (f'''
+SELECT * FROM climate_resilience.aridity_stats_{geo_level} WHERE ward_id={ward_selection_id};''')
+# Executing query 
+aridity_stats = conn.query(aridity_stats_query, ttl=None) # Store catched result
+#st.write(aridity_stats)
+
+# Extracting population stats
+population_stats_query = (f'''
+SELECT * FROM climate_resilience.mv_{geo_level}_population_statistics WHERE ward_id={ward_selection_id};''')
+# Executing query 
+population_stats = conn.query(population_stats_query, ttl=None) # Store catched result
+#st.write(population_stats)
+
+# Water_distribution points
+water_distribution_query = (f'''
+SELECT * FROM climate_resilience.mv_ward_waterpoints WHERE ward_id={ward_selection_id}''')
+# Executing query 
+water_distribution = conn.query(water_distribution_query, ttl=None) # Store catched result
+#st.write(water_distribution)
+
+# Extracting drought severity data
+drought_severity_query = (f'''
+SELECT * FROM climate_resilience.drought_severity_stats_{geo_level} 
+WHERE ward_id={ward_selection_id}''')
+# Executing query 
+drought_severity = conn.query(drought_severity_query, ttl=None) # Store catched result
+#st.write(drought_severity)
+
+# Extracting precipitation data
+precipitation_stats_query = (f'''
+SELECT * FROM climate_resilience.mv_monthly_rainfall_stats_{geo_level} 
+WHERE ward_id={ward_selection_id}''')
+# Executing query 
+precipitation_stats = conn.query(precipitation_stats_query, ttl=None) # Store catched result
+#st.write(precipitation_stats.head())
+
+# Extracting data max temperature
+daily_max_temp_query = (f'''
+SELECT * FROM climate_resilience.mv_monthly_max_temp_stats_{geo_level} WHERE ward_id={ward_selection_id}''')
+max_temp = conn.query(daily_max_temp_query)
+#st.write(max_temp.head())
+
+### OBTAINING THE PERCENTAGE OF HIGHLY VULNERABLE AREA IN THE SELECTED WARD
+
+# Stating the basin the ward belongs to
+basin_selection_id = ward_df[ward_df['ward_id']==ward_selection_id]['basin_id'].item()
+basin_selection = basin_mappings[basin_selection_id]
+st.write(f"## The selected ward belongs to the :blue[{basin_selection}]")
+
+@st.cache_data
+def read_data(loc):
+    # Reading in the data
+    df = pd.read_csv(loc)
+
+    # Returning the data
+    return df
+
+# Loading in data
+loc = r'excel_files/ward_water_resilience_labels.csv'
+df = read_data(loc)
+
+# Merging the ward_df with the water resilience labels
+df_merged = pd.merge(df,ward_df, on='ward_id', how='left')
+
+# Converting to GeoDataFrame
+df_merged = gpd.GeoDataFrame(df_merged, geometry='geometry')
+
+# Adding text for the total area with comma formatting
+st.write(f"## Total area of the {basin_selection} region")
+
+#st.write(df_merged.head())
+
+# Water resilience classification
+cluster_label = df_merged[df_merged['ward_id']==ward_selection_id]['cluster_name'].item()
+
+# Computing the percentage of the total area of the highly vulnerable wards 
+st.write("#### The total area of the region is ", f":yellow[{population_stats['area_sqkm'].item():,.2f}] km², of which is classified under the water-resiliency cluster:", f":yellow[{cluster_label}]")
+
+# Providing basic text of the population stats
+st.write("## Population Statistics")
+
+# Adding text of the total population with comma formating
+st.write("#### The total population is ", f":yellow[{population_stats['total_pop'].item():,}], with a population density of ", f":yellow[{population_stats['density'].item():,.2f}] people per km²")
+
+### Adding text on the total water distribution points and the percentage of functional water points
+st.write("## Water Distribution Points")
+# Adding text of the total water distribution points with comma formating
+st.write("#### According to WPDX+, the total number of water distribution points is ", f":yellow[{water_distribution['waterpoints_total'].item():,}], of which ", f":green[{water_distribution['waterpoints_functional'].item():,}] are functional")
+
+### Creating Land Aridity Distribution chart
+st.write("### Land Aridity Distribution")
+
+# Creating long format of the different percentage of aridity land types
+aridity_long = pd.melt(aridity_stats, id_vars=["stat_id"], value_vars=["pct_hyper_arid", "pct_arid", "pct_semi_arid", "pct_dry_sub_humid", "pct_humid"], var_name="aridity_type", value_name="percentage")
+
+# Cleaning up column names
+map_names = {'pct_hyper_arid': 'Hyper Arid', 'pct_arid': 'Arid', 'pct_semi_arid': 'Semi Arid', 'pct_dry_sub_humid': 'Dry Sub Humid', 'pct_humid': 'Humid'}
+aridity_long['aridity_type'] = aridity_long['aridity_type'].map(map_names)
+
+# Creating an order list for the aridity types
+aridity_order = ['Hyper Arid', 'Arid', 'Semi Arid', 'Dry Sub Humid', 'Humid']
+
+# Creating bar chart of land aridity stats
+aridity_chart = alt.Chart(aridity_long).mark_bar().encode(
+    x=alt.X('aridity_type:N', sort=aridity_order, title='Aridity Type'),
+    y=alt.Y('percentage:Q', title='Percentage of Land Area'),
+    color='aridity_type:N'
+)
+st.altair_chart(aridity_chart)
+
+### Creating plots of the monthly enviromental dataset (monthly precipitation, monthly drought, monthly max temperature)
+
+# Creating a tabbed layout for the monthly environmental data
+st.write("## Monthly Environmental Data")
+
+# Converting to python datetime format
+drought_severity['measure_date'] = pd.to_datetime(drought_severity['measure_date']).dt.to_pydatetime()
+precipitation_stats['year_month'] = pd.to_datetime(precipitation_stats['year_month']).dt.to_pydatetime()
+max_temp['year_month'] = pd.to_datetime(max_temp['year_month']).dt.to_pydatetime()
+
+tab1, tab2, tab3 = st.tabs(["Monthly Precipitation", "Monthly Max Temperature", "Monthly Drought Severity"])
+with tab1:
+
+    # Adding time slider for the monthly environmental data
+    min_date = precipitation_stats['year_month'].min()
+    max_date = precipitation_stats['year_month'].max()
+    month_slider_precipitation = st.slider("Select a Month", min_value=min_date, max_value=max_date, value=(min_date,max_date), key="month_slider_precipitation") 
+
+    # Filtering the precipitation data based on the selected month
+    filtered_precipitation_stats = precipitation_stats[(precipitation_stats['year_month'] >= month_slider_precipitation[0]) & (precipitation_stats['year_month'] <= month_slider_precipitation[1])]
+    
+    ### Creating a double axis chart
+    
+    # Creating monthly mean precipitation chart
+    base = alt.Chart(filtered_precipitation_stats, title='Monthly Precipitation').encode(
+    x=alt.X('year_month:T', title='Month'))
+
+    line_mean_precipitation = base.mark_area(color='#5276A7').encode(
+    y=alt.Y('monthly_average:Q', title='Average Precip (mm)').axis(titleColor='#5276A7' ),
+    tooltip=['year_month', 'monthly_average', 'monthly_min', 'monthly_max']
+    )
+
+    line_std_precipitation = base.mark_line(color='#57A44C').encode(
+    y=alt.Y('monthly_std:Q', title='Standard Deviation of Precipitation (mm)').axis(titleColor='#57A44C'),
+    tooltip=['year_month', 'monthly_std']
+    )  
+
+    chart = alt.layer(line_mean_precipitation, line_std_precipitation).resolve_scale(
+    y='independent')
+
+    # Plotting using streamlit
+    st.altair_chart(chart, use_container_width=True)
+
+    ### OLD WAY
+    # # Creating monthly mean precipitation chart
+    # preciptation_chart = alt.Chart(filtered_precipitation_stats, title='Monthly Precipitation').mark_line().encode(
+    # x=alt.X('year_month:T', title='Month',
+    #         axis=alt.Axis(format='%b %Y', title='Date')),
+    # y=alt.Y('monthly_average:Q', title='Average Precip (mm)'),
+    # tooltip=['year_month', 'monthly_average', 'monthly_min', 'monthly_max'])
+
+    # # Creating monthly standard deviation precipitation chart
+    # preciptation_chart_std = alt.Chart(filtered_precipitation_stats).mark_line().encode(
+    # x=alt.X('year_month:T', title='Month',
+    #         axis=alt.Axis(format='%b %Y', title='Date')),
+    # y=alt.Y('monthly_std:Q', title='Average Precip (mm)'),
+    # tooltip=['year_month', 'monthly_average', 'monthly_min', 'monthly_max'])
+
+    # st.write(filtered_precipitation_stats.head())
+    # st.altair_chart(preciptation_chart)
+with tab2:
+
+    # Creating max and min objects
+    min_date = max_temp['year_month'].min()
+    max_date = max_temp['year_month'].max()
+    
+    # Creating slider
+    month_slider_max_temp= st.slider("Select a Month", min_value=min_date, max_value=max_date, value=(min_date,max_date), key="month_slider_max_temp")
+    # Filtering the max_temp based on the selected month
+    filtered_max_temp = max_temp[(max_temp['year_month'] >= month_slider_max_temp[0]) & (max_temp['year_month'] <= month_slider_max_temp[1])]
+
+    # Creating monthly mean precipitation chart
+    base = alt.Chart(filtered_max_temp, title='Monthly Max Temp').encode(
+    x=alt.X('year_month:T', title='Month'))
+
+    line_mean_max_temp = base.mark_area(opacity=.80, color='#5276A7').encode(
+    y=alt.Y('monthly_average:Q', title='Average Max Temp (°C)').axis(titleColor='#5276A7' ),
+    tooltip=['year_month', 'monthly_average', 'monthly_min', 'monthly_max']
+    )
+
+    line_std_max_temp = base.mark_line(color='#57A44C').encode(
+    y=alt.Y('monthly_temperature_std:Q', title='Standard Deviation of Max Temp (°C)').axis(titleColor='#57A44C'),
+    tooltip=['year_month', 'monthly_temperature_std']
+    )  
+
+    chart = alt.layer(line_mean_max_temp, line_std_max_temp).resolve_scale(
+    y='independent')
+
+    # Plotting using streamlit
+    st.altair_chart(chart, use_container_width=True)
+
+
+    ### OLD WAY
+    # # Creating daily max temperature chart
+    # daily_max_temp_chart = alt.Chart(filtered_max_temp, title='Monthly Max Temperature').mark_line().encode(
+    # x=alt.X('year_month:T', title='Month', axis=alt.Axis(format='%b %Y', title='Date')),
+    # y=alt.Y('monthly_average:Q', title='Average Max Temp (°C)'),
+    # tooltip=['year_month', 'monthly_average', 'monthly_max', 'monthly_min']
+    # )
+
+    # # Plotting
+    # st.altair_chart(daily_max_temp_chart)
+with tab3:
+
+    # Creating min and max objects
+    min_date = drought_severity['measure_date'].min()
+    max_date = drought_severity['measure_date'].max()
+    # Creating slider
+    month_slider_drought= st.slider("Select a Month", min_value=min_date, max_value=max_date, value=(min_date,max_date), key="month_slider_drought")
+    
+    # Creating a long format of the drought severity data
+    drought_severity_long = pd.melt(drought_severity, id_vars=["measure_date",'ward_id'], value_vars=["pct_moderate_drought", "pct_severe_drought", "pct_extreme_drought"], var_name="drought_severity_type", value_name="percentage")
+
+    # Remapping the drought types to more readable format
+    drought_severity_long['drought_severity_type'] = drought_severity_long['drought_severity_type'].map({'pct_moderate_drought': 'Moderate Drought', 'pct_severe_drought': 'Severe Drought', 'pct_extreme_drought': 'Extreme Drought'})
+
+    # Filtering the drought_severity based on the selected month
+    filtered_drought_severity = drought_severity_long[(drought_severity_long['measure_date'] >= month_slider_drought[0]) & (drought_severity_long['measure_date'] <= month_slider_drought[1])]
+
+    # Creating monthly area line charrt of drought severity 
+    drought_severity_chart = alt.Chart(filtered_drought_severity, title='Monthly Drought Severity').mark_area().encode(
+    x=alt.X('measure_date:T', title='Month', axis=alt.Axis(format='%b %y', title='Date')),
+    y=alt.Y('percentage:Q', title='Percent of Region Under a Drought Severity Type'),
+    color='drought_severity_type:N',
+    tooltip=['measure_date', 'drought_severity_type', 'percentage']
+)
+    # Plotting
+    st.altair_chart(drought_severity_chart)
+
+
+
+
+
+
+
+
