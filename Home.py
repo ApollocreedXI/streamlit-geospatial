@@ -28,10 +28,10 @@ st.markdown("""
 
 st.info("Click on the left sidebar menu to navigate to the vulnerability clustering app and the exploritory dashboard.")
 
-st.subheader("Timelapse of Satellite Imagery")
-st.markdown("""
-    The following timelapse animations were created using the Timelapse web app. Click `Timelapse` on the left sidebar menu to create your own timelapse for any location around the globe.
-""")
+# st.subheader("Timelapse of Satellite Imagery")
+# st.markdown("""
+#     The following timelapse animations were created using the Timelapse web app. Click `Timelapse` on the left sidebar menu to create your own timelapse for any location around the globe.
+# """)
 
 # row1_col1, row1_col2 = st.columns(2)
 # with row1_col1:
